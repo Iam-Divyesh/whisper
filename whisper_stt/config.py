@@ -45,6 +45,22 @@ MODEL_SIZE             = _user.get("model_size", _DEFAULTS["model_size"])
 LANGUAGE               = _user.get("language",   _DEFAULTS["language"])
 HOTKEY                 = _user.get("hotkey",     _DEFAULTS["hotkey"])
 
+
+def get_language() -> "str | None":
+    """Return the current language setting, re-reading config.json every call.
+
+    Returns None for 'auto' (faster-whisper auto-detects when language=None).
+    This lets the user change language in settings without restarting the app.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, encoding="utf-8") as _f:
+                lang = json.load(_f).get("language", _DEFAULTS["language"])
+            return None if lang == "auto" else lang
+    except Exception:
+        pass
+    return _DEFAULTS["language"]
+
 # Typing / UI
 TYPE_DELAY             = 0.01
 USE_CLIPBOARD_FALLBACK = True

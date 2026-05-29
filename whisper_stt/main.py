@@ -179,7 +179,7 @@ class WhisperSTTApp:
             try:
                 text = self._model.transcribe_sync(
                     audio,
-                    language=config.LANGUAGE,
+                    language=config.get_language(),
                     beam_size=1,
                     best_of=1,
                 )
@@ -214,7 +214,7 @@ class WhisperSTTApp:
             peak = np.max(np.abs(audio_data))
             print(f"Transcribing {duration:.1f}s audio (RMS:{rms:.4f} Peak:{peak:.4f})...")
 
-            text = self._model.transcribe_sync(audio_data, language=config.LANGUAGE)
+            text = self._model.transcribe_sync(audio_data, language=config.get_language())
 
             if text:
                 print(f"Transcribed: '{text}'")
