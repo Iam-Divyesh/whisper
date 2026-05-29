@@ -65,11 +65,14 @@ class AudioCapture:
             
             self._is_recording = False
             if self._stream:
-                self._stream.stop()
-                # Give pending callbacks a moment to flush into the queue
-                time.sleep(0.05)
-                self._stream.close()
-                self._stream = None
+                try:
+                    self._stream.stop()
+                    time.sleep(0.05)
+                    self._stream.close()
+                except Exception as e:
+                    print(f"Audio stream error: {e}")
+                finally:
+                    self._stream = None  # always clear so next recording starts clean
 
             # Collect all audio chunks
             chunks = []

@@ -103,11 +103,18 @@ class WhisperSTTApp:
             self._tray.set_state(TrayState.PROCESSING)
         audio_data = self._audio.stop_recording() if self._audio else None
         if audio_data is not None and len(audio_data) > 0:
-            threading.Thread(
-                target=self._transcribe_and_type,
-                args=(audio_data,),
-                daemon=True,
-            ).start()
+            try:
+                t = threading.Thread(
+                    target=self._transcribe_and_type,
+                    args=(audio_data,),
+                    daemon=True,
+                )
+                t.start()
+            except Exception as e:
+                print(f"Failed to start transcription thread: {e}")
+                self._processing = False
+                if self._tray:
+                    self._tray.set_state(TrayState.IDLE)
         else:
             print("No audio captured")
             self._processing = False
@@ -191,9 +198,14 @@ class WhisperSTTApp:
             )
             self._model._load_model()
             print("Model pre-loaded and ready!")
+            if self._tray:
+                self._tray.notify("Whisper STT", f"Ready — hold {config.HOTKEY} to record")
         except Exception as e:
-            print(f"Model pre-load failed (will retry on first use): {e}")
+            print(f"Model pre-load failed: {e}")
             self._model = None
+            if self._tray:
+                self._tray.set_state(TrayState.ERROR)
+                self._tray.notify("Whisper STT", f"Model failed to load: {str(e)[:80]}")
 
     # ── Start / stop ──────────────────────────────────────────────────────────
 
@@ -207,8 +219,14 @@ class WhisperSTTApp:
                 if not input_devices:
                     print("No microphone found! Please connect a microphone and restart.")
                     sys.exit(1)
-                default_input = sd.query_devices(kind='input')
-                print(f"Using microphone: {default_input['name']}")
+                try:
+                    default_input = sd.query_devices(kind='input')
+                    name = default_input.get('name', 'Unknown') if isinstance(default_input, dict) else str(default_input)
+                    print(f"Using microphone: {name}")
+                except Exception:
+                    print(f"Using microphone: {input_devices[0].get('name', 'Unknown')}")
+            except SystemExit:
+                raise
             except Exception as e:
                 print(f"Could not verify microphone: {e}")
 
