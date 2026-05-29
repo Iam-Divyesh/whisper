@@ -292,20 +292,45 @@ def _uninstall():
     _row("  Uninstalling...")
     _row()
 
-    # 1. Remove startup registry entry
+    import shutil, winreg, ctypes
+
+    # 1. Kill any running Whisper processes
     try:
-        import winreg
+        import psutil  # optional — skip gracefully if not installed
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+            exe = proc.info.get('exe') or ''
+            if 'whisper' in exe.lower() or (
+                proc.info['name'] in ('pythonw.exe', 'python.exe') and
+                'whisper' in exe.lower()
+            ):
+                proc.kill()
+        _row("  [OK]  Running processes stopped.")
+    except ImportError:
+        # psutil not available — use WMI / taskkill as fallback
+        try:
+            subprocess.run(
+                ['taskkill', '/F', '/IM', 'pythonw.exe'],
+                capture_output=True,
+            )
+            _row("  [OK]  pythonw processes stopped.")
+        except Exception:
+            _row("  [--]  Could not stop processes (close tray icon manually).")
+    except Exception as e:
+        _row(f"  [!!]  Processes: {e}")
+
+    # 2. Remove startup registry entry
+    try:
         k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY, 0, winreg.KEY_SET_VALUE)
-        winreg.DeleteValue(k, _REG_NAME)
+        try:
+            winreg.DeleteValue(k, _REG_NAME)
+        except FileNotFoundError:
+            pass
         winreg.CloseKey(k)
         _row("  [OK]  Startup entry removed.")
-    except FileNotFoundError:
-        _row("  [--]  Startup entry not set.")
     except Exception as e:
         _row(f"  [!!]  Startup: {e}")
 
-    # 2. Remove app data dir
-    import shutil
+    # 3. Remove app data dir (config, logs, models)
     app_dir = Path.home() / ".whisper_stt"
     if app_dir.exists():
         try:
@@ -316,9 +341,21 @@ def _uninstall():
     else:
         _row("  [--]  No app data found.")
 
-    # 3. Uninstall npm package
+    # 4. Uninstall whisper-stt pip package from this venv
     try:
-        import subprocess
+        r = subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "whisper-stt", "-y"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            _row("  [OK]  pip package uninstalled.")
+        else:
+            _row("  [--]  pip package was not installed.")
+    except Exception as e:
+        _row(f"  [!!]  pip: {e}")
+
+    # 5. Uninstall npm global package
+    try:
         r = subprocess.run(
             ["npm", "uninstall", "-g", "whisper-stt"],
             capture_output=True, text=True, shell=True,
