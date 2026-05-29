@@ -79,12 +79,16 @@ class WhisperModel:
                     except Exception:
                         self.device = "cpu"
 
-                print(f"Loading Whisper model: {self.model_size} on {self.device}")
+                import os
+                cpu_threads = os.cpu_count() or 4
+                print(f"Loading Whisper model: {self.model_size} on {self.device} ({cpu_threads} threads)")
                 self._model = FWModel(
                     self.model_size,
                     device=self.device,
                     compute_type=self.compute_type,
                     download_root=self.download_root,
+                    cpu_threads=cpu_threads,
+                    num_workers=1,
                 )
                 print("Model loaded successfully!")
             except ImportError:
