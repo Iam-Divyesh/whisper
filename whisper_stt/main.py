@@ -40,6 +40,7 @@ from whisper_stt.stt.model import WhisperModel
 from whisper_stt.input.hotkeys import HotkeyManager
 from whisper_stt.input.typer import KeyboardTyper
 from whisper_stt.ui.tray import TrayIcon, TrayState
+from whisper_stt.ui.overlay import TranscriptionOverlay
 
 
 class WhisperSTTApp:
@@ -56,8 +57,9 @@ class WhisperSTTApp:
         self._processing         = False
         self._target_hwnd        = None
         self._lock               = threading.Lock()
-        self._stream_stop: Optional[threading.Event] = None
-        self._stream_typed_chunks = 0   # _chunks index of last chunk typed by streaming
+        self._stream_stop: Optional[threading.Event]    = None
+        self._stream_typed_chunks = 0
+        self._overlay: Optional[TranscriptionOverlay]   = None
 
     # ── Window focus ──────────────────────────────────────────────────────────
 
@@ -94,8 +96,10 @@ class WhisperSTTApp:
         if self._audio:
             self._audio.start_recording()
 
-        # Start real-time streaming transcription thread
+        # Show glass overlay and start real-time streaming thread
         self._stream_typed_chunks = 0
+        self._overlay = TranscriptionOverlay()
+        self._overlay.show()
         self._stream_stop = threading.Event()
         threading.Thread(target=self._stream_transcribe, daemon=True).start()
 
@@ -106,10 +110,12 @@ class WhisperSTTApp:
             self._recording  = False
             self._processing = True
 
-        # Signal streaming to stop, then let it finish any in-progress type
+        # Signal streaming to stop, update overlay to "Processing..."
         if self._stream_stop:
             self._stream_stop.set()
             self._stream_stop = None
+        if self._overlay:
+            self._overlay.set_status("Processing...", "#ffa502")
 
         print("Recording stopped, processing...")
         if self._tray:
@@ -187,6 +193,8 @@ class WhisperSTTApp:
                     chunk_idx = new_idx
                     self._stream_typed_chunks = new_idx
                     print(f"[stream] {text}")
+                    if self._overlay:
+                        self._overlay.update_text(text)
                     # Restore focus and type directly into the active window
                     if self._target_hwnd:
                         self._set_foreground_window(self._target_hwnd)
@@ -198,6 +206,7 @@ class WhisperSTTApp:
     # ── Transcription ─────────────────────────────────────────────────────────
 
     def _transcribe_and_type(self, audio_data):
+        overlay = self._overlay
         try:
             if self._model is None:
                 print("Loading Whisper model...")
@@ -242,6 +251,9 @@ class WhisperSTTApp:
             self._processing = False
             if self._tray:
                 self._tray.set_state(TrayState.IDLE)
+            if overlay:
+                overlay.hide()
+                self._overlay = None
 
     # ── Tray callbacks ────────────────────────────────────────────────────────
 
