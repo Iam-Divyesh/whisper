@@ -17,12 +17,8 @@ const SETUP_JS = path.join(PKG_ROOT, 'scripts', 'postinstall.js');
 // Run setup on first use (postinstall can't do this reliably because npm
 // runs it from a temp clone dir before moving the package to node_modules)
 if (!fs.existsSync(VENV_PY)) {
-  console.log('\n  First run — setting up Python environment...');
-  console.log('  This takes a few minutes. Only happens once.\n');
   const r = spawnSync(process.execPath, [SETUP_JS], { stdio: 'inherit' });
   if (r.status !== 0) {
-    console.error('\n  Setup failed. Make sure Python 3.8+ is installed:');
-    console.error('  https://python.org  (check "Add Python to PATH")\n');
     process.exit(1);
   }
 }
