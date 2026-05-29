@@ -96,14 +96,31 @@ class AudioCapture:
             return np.concatenate(chunks, axis=0).flatten()
     
     def peek_audio(self) -> np.ndarray:
-        """Return all buffered audio so far without clearing the buffer.
-
-        Safe to call while recording is in progress.
-        """
+        """Return all buffered audio so far without clearing the buffer."""
         with self._chunks_lock:
             if not self._chunks:
                 return np.array([], dtype=np.float32)
             return np.concatenate(self._chunks, axis=0).flatten()
+
+    def get_new_audio_since(self, chunk_index: int):
+        """Return (audio, new_chunk_index) for chunks after chunk_index.
+
+        The caller advances its own index each call to get only new audio.
+        """
+        with self._chunks_lock:
+            new_chunks = self._chunks[chunk_index:]
+            new_index = len(self._chunks)
+        if not new_chunks:
+            return np.array([], dtype=np.float32), chunk_index
+        return np.concatenate(new_chunks, axis=0).flatten(), new_index
+
+    def get_audio_from(self, chunk_index: int) -> np.ndarray:
+        """Return audio from chunk_index to end — the un-typed remainder."""
+        with self._chunks_lock:
+            chunks = self._chunks[chunk_index:]
+        if not chunks:
+            return np.array([], dtype=np.float32)
+        return np.concatenate(chunks, axis=0).flatten()
 
     def is_recording(self) -> bool:
         """Check if currently recording."""

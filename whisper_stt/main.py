@@ -40,7 +40,6 @@ from whisper_stt.stt.model import WhisperModel
 from whisper_stt.input.hotkeys import HotkeyManager
 from whisper_stt.input.typer import KeyboardTyper
 from whisper_stt.ui.tray import TrayIcon, TrayState
-from whisper_stt.ui.overlay import TranscriptionOverlay
 
 
 class WhisperSTTApp:
@@ -53,13 +52,12 @@ class WhisperSTTApp:
         self._hotkeys: Optional[HotkeyManager] = None
         self._typer:   Optional[KeyboardTyper] = None
         self._tray:    Optional[TrayIcon]      = None
-        self._recording   = False
-        self._processing  = False
-        self._target_hwnd = None
-        self._lock        = threading.Lock()
-        self._overlay: Optional[TranscriptionOverlay] = None
-        self._stream_stop: Optional[threading.Event]  = None
-        self._stream_accumulated = ""
+        self._recording          = False
+        self._processing         = False
+        self._target_hwnd        = None
+        self._lock               = threading.Lock()
+        self._stream_stop: Optional[threading.Event] = None
+        self._stream_typed_chunks = 0   # _chunks index of last chunk typed by streaming
 
     # ── Window focus ──────────────────────────────────────────────────────────
 
@@ -96,10 +94,8 @@ class WhisperSTTApp:
         if self._audio:
             self._audio.start_recording()
 
-        # Show live transcription overlay and start streaming thread
-        self._stream_accumulated = ""
-        self._overlay = TranscriptionOverlay()
-        self._overlay.show()
+        # Start real-time streaming transcription thread
+        self._stream_typed_chunks = 0
         self._stream_stop = threading.Event()
         threading.Thread(target=self._stream_transcribe, daemon=True).start()
 
@@ -110,22 +106,34 @@ class WhisperSTTApp:
             self._recording  = False
             self._processing = True
 
-        # Stop streaming thread and update overlay status
+        # Signal streaming to stop, then let it finish any in-progress type
         if self._stream_stop:
             self._stream_stop.set()
             self._stream_stop = None
-        if self._overlay:
-            self._overlay.set_status("⚙  Processing...", "#e0b352")
 
         print("Recording stopped, processing...")
         if self._tray:
             self._tray.set_state(TrayState.PROCESSING)
-        audio_data = self._audio.stop_recording() if self._audio else None
-        if audio_data is not None and len(audio_data) > 0:
+
+        # Short pause so the streaming thread finishes its current type() call
+        # before we stop the audio stream and read the typed-chunk index.
+        time.sleep(0.15)
+
+        if self._audio:
+            self._audio.stop_recording()
+
+        # Transcribe only the audio the streaming thread hasn't typed yet
+        typed_idx = self._stream_typed_chunks
+        if typed_idx > 0 and self._audio:
+            remaining = self._audio.get_audio_from(typed_idx)
+        else:
+            remaining = self._audio.peek_audio() if self._audio else None
+
+        if remaining is not None and len(remaining) / config.SAMPLE_RATE >= 0.3:
             try:
                 t = threading.Thread(
                     target=self._transcribe_and_type,
-                    args=(audio_data,),
+                    args=(remaining,),
                     daemon=True,
                 )
                 t.start()
@@ -135,7 +143,7 @@ class WhisperSTTApp:
                 if self._tray:
                     self._tray.set_state(TrayState.IDLE)
         else:
-            print("No audio captured")
+            print("No remaining audio to transcribe")
             self._processing = False
             if self._tray:
                 self._tray.set_state(TrayState.IDLE)
@@ -143,23 +151,29 @@ class WhisperSTTApp:
     # ── Streaming transcription (during recording) ────────────────────────────
 
     def _stream_transcribe(self):
-        """Every 2.5 s, transcribe all buffered audio and update the overlay.
+        """Every 2.5 s grab NEW audio since last chunk, transcribe and type it.
 
-        Uses fast greedy decoding (beam_size=1) so it doesn't block recording.
-        The final transcription on hotkey-release is still beam_size=5 for accuracy.
+        Uses fast greedy decoding (beam_size=1) so latency stays low.
+        Tracks _stream_typed_chunks so _stop_recording only re-transcribes
+        the audio that wasn't covered here.
         """
         stop = self._stream_stop
+        chunk_idx = 0  # index into AudioCapture._chunks processed so far
+
         while stop and not stop.wait(2.5):
             if not self._recording:
                 break
             if self._model is None or self._model._model is None:
-                continue  # model not loaded yet — wait for pre-load
+                continue  # model not loaded yet — keep waiting
 
-            audio = self._audio.peek_audio() if self._audio else None
-            if audio is None or len(audio) == 0:
+            if not self._audio:
+                continue
+
+            audio, new_idx = self._audio.get_new_audio_since(chunk_idx)
+            if len(audio) == 0:
                 continue
             duration = len(audio) / config.SAMPLE_RATE
-            if duration < 1.0:
+            if duration < 0.5:
                 continue
 
             try:
@@ -170,17 +184,20 @@ class WhisperSTTApp:
                     best_of=1,
                 )
                 if text:
-                    self._stream_accumulated = text
-                    if self._overlay:
-                        self._overlay.update_text(text)
+                    chunk_idx = new_idx
+                    self._stream_typed_chunks = new_idx
                     print(f"[stream] {text}")
+                    # Restore focus and type directly into the active window
+                    if self._target_hwnd:
+                        self._set_foreground_window(self._target_hwnd)
+                    if self._typer:
+                        self._typer.type_text(text + " ")
             except Exception as e:
                 print(f"Stream transcription error: {e}")
 
     # ── Transcription ─────────────────────────────────────────────────────────
 
     def _transcribe_and_type(self, audio_data):
-        overlay = self._overlay  # capture ref — hide it when done
         try:
             if self._model is None:
                 print("Loading Whisper model...")
@@ -225,9 +242,6 @@ class WhisperSTTApp:
             self._processing = False
             if self._tray:
                 self._tray.set_state(TrayState.IDLE)
-            if overlay:
-                overlay.hide()
-                self._overlay = None
 
     # ── Tray callbacks ────────────────────────────────────────────────────────
 
