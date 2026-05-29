@@ -12,7 +12,7 @@ class AudioCapture:
     
     def __init__(self, sample_rate: int = 16000, channels: int = 1):
         """Initialize audio capture.
-        
+
         Args:
             sample_rate: Audio sample rate (16kHz for Whisper)
             channels: Number of audio channels (1 for mono)
@@ -23,13 +23,18 @@ class AudioCapture:
         self._stream: Optional[sd.InputStream] = None
         self._is_recording = False
         self._lock = threading.Lock()
+        self._chunks: list = []
+        self._chunks_lock = threading.Lock()
         
     def _callback(self, indata: np.ndarray, frames: int, time_info, status: sd.CallbackFlags):
         """Called for each audio chunk."""
         if status:
             print(f"Audio callback status: {status}")
         if self._is_recording:
-            self._queue.put(indata.copy())
+            chunk = indata.copy()
+            self._queue.put(chunk)
+            with self._chunks_lock:
+                self._chunks.append(chunk)
     
     def start_recording(self) -> None:
         """Start recording from microphone."""
@@ -43,7 +48,9 @@ class AudioCapture:
                     self._queue.get_nowait()
                 except queue.Empty:
                     break
-            
+            with self._chunks_lock:
+                self._chunks = []
+
             self._is_recording = True
             self._stream = sd.InputStream(
                 samplerate=self.sample_rate,
@@ -88,6 +95,16 @@ class AudioCapture:
             # Concatenate all chunks
             return np.concatenate(chunks, axis=0).flatten()
     
+    def peek_audio(self) -> np.ndarray:
+        """Return all buffered audio so far without clearing the buffer.
+
+        Safe to call while recording is in progress.
+        """
+        with self._chunks_lock:
+            if not self._chunks:
+                return np.array([], dtype=np.float32)
+            return np.concatenate(self._chunks, axis=0).flatten()
+
     def is_recording(self) -> bool:
         """Check if currently recording."""
         return self._is_recording
