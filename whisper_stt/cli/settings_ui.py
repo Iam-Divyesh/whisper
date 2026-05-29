@@ -172,6 +172,7 @@ MENU = [
     ("hotkey",     "Hotkey"),
     ("startup",    "Startup on Boot"),
     ("---",        ""),
+    ("uninstall",  "Uninstall from this device"),
     ("exit",       "Exit"),
 ]
 SELECTABLE = [i for i, (k, _) in enumerate(MENU) if k != "---"]
@@ -239,6 +240,9 @@ def _draw(cfg: dict, sel: int, status: str = ""):
             val = "ON " if cfg.get("startup") else "OFF"
             _row(f"{cur}  Startup on Boot  [ {val} ]       ◄►")
 
+        elif key == "uninstall":
+            _row(f"{cur}  Uninstall from this device")
+
         elif key == "exit":
             _row(f"{cur}  Exit")
 
@@ -252,6 +256,89 @@ def _draw(cfg: dict, sel: int, status: str = ""):
     _row("  ↑↓  Navigate    ◄►  Change value    Enter  Select")
     _bot()
     print()
+
+# ─── Uninstall ───────────────────────────────────────────────────────────────
+
+def _uninstall():
+    """Remove all Whisper STT traces from this device."""
+    os.system("cls")
+    print(BANNER)
+    print()
+    _top()
+    _row()
+    _row("  Uninstall Whisper STT from this device")
+    _row()
+    _row("  This will remove:")
+    _row("    • Startup on boot entry")
+    _row("    • Config and log files  (~/.whisper_stt/)")
+    _row("    • Downloaded models     (~/.whisper_stt/models/)")
+    _row("    • npm global package    (whisper command)")
+    _row()
+    _row("  The source folder is NOT deleted.")
+    _row()
+    _dsep()
+    _row("  Are you sure?  Press Y to confirm, any other key to cancel.")
+    _bot()
+    print()
+
+    ch = msvcrt.getch()
+    if ch.lower() != b'y':
+        return False
+
+    os.system("cls")
+    print(BANNER)
+    print()
+    _top()
+    _row("  Uninstalling...")
+    _row()
+
+    # 1. Remove startup registry entry
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY, 0, winreg.KEY_SET_VALUE)
+        winreg.DeleteValue(k, _REG_NAME)
+        winreg.CloseKey(k)
+        _row("  [OK]  Startup entry removed.")
+    except FileNotFoundError:
+        _row("  [--]  Startup entry not set.")
+    except Exception as e:
+        _row(f"  [!!]  Startup: {e}")
+
+    # 2. Remove app data dir
+    import shutil
+    app_dir = Path.home() / ".whisper_stt"
+    if app_dir.exists():
+        try:
+            shutil.rmtree(app_dir)
+            _row("  [OK]  App data and models deleted.")
+        except Exception as e:
+            _row(f"  [!!]  App data: {e}")
+    else:
+        _row("  [--]  No app data found.")
+
+    # 3. Uninstall npm package
+    try:
+        import subprocess
+        r = subprocess.run(
+            ["npm", "uninstall", "-g", "whisper-stt"],
+            capture_output=True, text=True, shell=True,
+        )
+        if r.returncode == 0:
+            _row("  [OK]  npm package uninstalled.")
+        else:
+            _row("  [!!]  npm uninstall failed — run manually:")
+            _row("        npm uninstall -g whisper-stt")
+    except Exception as e:
+        _row(f"  [!!]  npm: {e}")
+
+    _row()
+    _row("  Uninstall complete. This window will close.")
+    _bot()
+    print()
+    import time
+    time.sleep(3)
+    return True
+
 
 # ─── Hotkey prompt ───────────────────────────────────────────────────────────
 
@@ -377,6 +464,10 @@ def main():
                     status = f"Startup on boot {state}."
                 else:
                     status = "Could not update startup — try running as Administrator."
+
+            elif ik == "uninstall":
+                if _uninstall():
+                    sys.exit(0)
 
             elif ik == "exit":
                 sys.exit(0)
