@@ -16,14 +16,21 @@ No internet required after first run. All processing happens on your machine.
 ## Quick Start
 
 ```bash
-# 1. Clone
-git clone https://github.com/YOUR_USERNAME/whisper-stt.git
-cd whisper-stt
+# Install globally with one command (requires Node.js + Python 3.8+)
+npm i -g github:Iam-Divyesh/whisper
 
-# 2. Setup (Windows — run once)
+# Then just run:
+whisper
+```
+
+npm automatically sets up the Python environment on first install.
+
+### Alternative: clone manually
+
+```bash
+git clone https://github.com/Iam-Divyesh/whisper.git
+cd whisper
 setup.bat
-
-# 3. Launch (open a new terminal after setup)
 whisper
 ```
 

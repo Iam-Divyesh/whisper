@@ -1,0 +1,17 @@
+{
+  "name": "whisper-stt",
+  "version": "1.0.0",
+  "description": "Offline speech-to-text for Windows — hold a hotkey, speak, release.",
+  "keywords": ["whisper", "speech-to-text", "stt", "offline", "windows", "voice"],
+  "author": "Iam-Divyesh",
+  "license": "MIT",
+  "bin": {
+    "whisper": "./bin/whisper.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

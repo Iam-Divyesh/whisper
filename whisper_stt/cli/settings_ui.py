@@ -42,6 +42,30 @@ LANGUAGES = [
 LANG_CODES = [l[0] for l in LANGUAGES]
 LANG_NAMES = {l[0]: l[1] for l in LANGUAGES}
 
+# ─── Package root & bootstrap ────────────────────────────────────────────────
+
+def _pkg_root() -> Path:
+    """Find the project root (parent of whisper_stt/).
+
+    Works whether launched via npm (exe in .venv/Scripts/) or pip install.
+    """
+    # npm path: python.exe lives in {root}/.venv/Scripts/python.exe
+    candidate = Path(sys.executable).parent.parent.parent
+    if (candidate / "whisper_stt").is_dir():
+        return candidate
+    # pip / editable install: derive from this file's location
+    return Path(__file__).parent.parent.parent
+
+
+def _bootstrap() -> Path:
+    return _pkg_root() / "scripts" / "start_app.py"
+
+
+def _pythonw() -> Path:
+    pw = Path(sys.executable).parent / "pythonw.exe"
+    return pw if pw.exists() else Path(sys.executable)
+
+
 # ─── Startup registry ────────────────────────────────────────────────────────
 
 _REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -64,10 +88,7 @@ def _set_startup(enable: bool) -> bool:
         import winreg
         k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY, 0, winreg.KEY_SET_VALUE)
         if enable:
-            pythonw = Path(sys.executable).parent / "pythonw.exe"
-            if not pythonw.exists():
-                pythonw = Path(sys.executable)
-            cmd = f'"{pythonw}" -m whisper_stt.main'
+            cmd = f'"{_pythonw()}" "{_bootstrap()}"'
             winreg.SetValueEx(k, _REG_NAME, 0, winreg.REG_SZ, cmd)
         else:
             try:
@@ -105,11 +126,8 @@ def save_config(cfg: dict) -> None:
 
 def _launch_app() -> bool:
     try:
-        pythonw = Path(sys.executable).parent / "pythonw.exe"
-        if not pythonw.exists():
-            pythonw = Path(sys.executable)
         subprocess.Popen(
-            [str(pythonw), "-m", "whisper_stt.main"],
+            [str(_pythonw()), str(_bootstrap())],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
         return True
