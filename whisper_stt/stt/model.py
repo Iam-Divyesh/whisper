@@ -51,22 +51,26 @@ class WhisperModel:
         self.device = device
         self.compute_type = compute_type
         self._model = None
-        
+        self._load_lock = __import__('threading').Lock()
+
         # Set default download location
         if download_root is None:
             self.download_root = str(Path.home() / ".cache" / "whisper-stt" / "models")
         else:
             self.download_root = download_root
-            
+
         os.makedirs(self.download_root, exist_ok=True)
-    
+
     def _load_model(self):
-        """Lazy load the model."""
-        if self._model is None:
+        """Lazy load the model — thread-safe, loads exactly once."""
+        if self._model is not None:
+            return
+        with self._load_lock:
+            if self._model is not None:  # another thread loaded it while we waited
+                return
             try:
                 from faster_whisper import WhisperModel as FWModel
-                
-                # Auto-detect device
+
                 if self.device == "auto":
                     try:
                         import ctranslate2
@@ -74,20 +78,17 @@ class WhisperModel:
                         self.device = "cuda" if cuda_count > 0 else "cpu"
                     except Exception:
                         self.device = "cpu"
-                
+
                 print(f"Loading Whisper model: {self.model_size} on {self.device}")
                 self._model = FWModel(
                     self.model_size,
                     device=self.device,
                     compute_type=self.compute_type,
-                    download_root=self.download_root
+                    download_root=self.download_root,
                 )
                 print("Model loaded successfully!")
             except ImportError:
-                raise ImportError(
-                    "faster-whisper not installed. "
-                    "Run: pip install faster-whisper"
-                )
+                raise ImportError("faster-whisper not installed. Run: pip install faster-whisper")
             except Exception as e:
                 raise RuntimeError(f"Failed to load model: {e}")
     
@@ -146,16 +147,15 @@ class WhisperModel:
         if duration < 0.3:
             return False
         
-        # Check RMS energy level
+        # Check RMS energy level — threshold lowered to 0.0005 so quiet
+        # microphones still pass; Whisper's VAD does the real silence filtering
         rms = np.sqrt(np.mean(audio ** 2))
-        
-        # Very quiet audio (RMS < 0.003) is likely silence/noise
-        if rms < 0.003:
+        if rms < 0.0005:
             return False
-        
+
         # Check peak amplitude
         peak = np.max(np.abs(audio))
-        if peak < 0.01:
+        if peak < 0.005:
             return False
         
         return True
