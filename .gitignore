@@ -1,0 +1,31 @@
+# Virtual environments
+.venv/
+venv/
+env/
+whisper_stt/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Package build artifacts
+*.egg-info/
+dist/
+build/
+*.spec
+
+# App runtime data
+*.log
+models/
+
+# IDE / editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+Thumbs.db
+.DS_Store

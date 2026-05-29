@@ -1,0 +1,138 @@
+"""Global hotkey handling using pynput."""
+import threading
+from typing import Callable, Optional
+from pynput import keyboard
+
+
+class HotkeyManager:
+    """Manage global hotkeys."""
+    
+    def __init__(self):
+        """Initialize hotkey manager."""
+        self._listener: Optional[keyboard.Listener] = None
+        self._hotkeys = {}
+        self._pressed_keys = set()
+        self._lock = threading.Lock()
+        self._running = False
+        
+    def register_hotkey(
+        self,
+        combination: str,
+        on_press: Callable,
+        on_release: Optional[Callable] = None
+    ) -> None:
+        """Register a hotkey combination.
+        
+        Args:
+            combination: Hotkey string (e.g., 'ctrl+shift+space')
+            on_press: Callback when hotkey is pressed
+            on_release: Callback when hotkey is released
+        """
+        keys = self._parse_combination(combination)
+        self._hotkeys[combination] = {
+            'keys': keys,
+            'on_press': on_press,
+            'on_release': on_release,
+            'is_pressed': False
+        }
+        print(f"Registered hotkey: {combination}")
+    
+    def _parse_combination(self, combination: str) -> set:
+        """Parse hotkey string into set of keys."""
+        parts = combination.lower().split('+')
+        keys = set()
+        
+        key_map = {
+            'ctrl': keyboard.Key.ctrl_l,
+            'ctrl_l': keyboard.Key.ctrl_l,
+            'ctrl_r': keyboard.Key.ctrl_r,
+            'alt': keyboard.Key.alt_l,
+            'alt_l': keyboard.Key.alt_l,
+            'alt_r': keyboard.Key.alt_r,
+            'shift': keyboard.Key.shift_l,
+            'shift_l': keyboard.Key.shift_l,
+            'shift_r': keyboard.Key.shift_r,
+            'space': keyboard.Key.space,
+            'tab': keyboard.Key.tab,
+            'enter': keyboard.Key.enter,
+            'esc': keyboard.Key.esc,
+            'up': keyboard.Key.up,
+            'down': keyboard.Key.down,
+            'left': keyboard.Key.left,
+            'right': keyboard.Key.right,
+        }
+        
+        for part in parts:
+            part = part.strip()
+            if part in key_map:
+                keys.add(key_map[part])
+            elif part.startswith('f') and part[1:].isdigit():
+                # Function keys F1-F12
+                keys.add(getattr(keyboard.Key, part))
+            elif len(part) == 1:
+                # Single character
+                keys.add(keyboard.KeyCode.from_char(part))
+            else:
+                # Try to get key by name
+                try:
+                    keys.add(getattr(keyboard.Key, part))
+                except AttributeError:
+                    print(f"Warning: Unknown key '{part}'")
+        
+        return keys
+    
+    def _on_press(self, key):
+        """Handle key press."""
+        with self._lock:
+            self._pressed_keys.add(key)
+            
+            for combo_name, combo_info in self._hotkeys.items():
+                if combo_info['keys'].issubset(self._pressed_keys):
+                    if not combo_info['is_pressed']:
+                        combo_info['is_pressed'] = True
+                        if combo_info['on_press']:
+                            try:
+                                combo_info['on_press']()
+                            except Exception as e:
+                                print(f"Hotkey press error: {e}")
+    
+    def _on_release(self, key):
+        """Handle key release."""
+        with self._lock:
+            self._pressed_keys.discard(key)
+            
+            for combo_name, combo_info in self._hotkeys.items():
+                if combo_info['is_pressed']:
+                    # Check if any required key was released
+                    if key in combo_info['keys']:
+                        combo_info['is_pressed'] = False
+                        if combo_info['on_release']:
+                            try:
+                                combo_info['on_release']()
+                            except Exception as e:
+                                print(f"Hotkey release error: {e}")
+    
+    def start(self) -> None:
+        """Start listening for hotkeys."""
+        if self._running:
+            return
+        
+        self._listener = keyboard.Listener(
+            on_press=self._on_press,
+            on_release=self._on_release
+        )
+        self._listener.start()
+        self._running = True
+        print("Hotkey listener started")
+    
+    def stop(self) -> None:
+        """Stop listening for hotkeys."""
+        self._running = False
+        if self._listener:
+            self._listener.stop()
+            self._listener = None
+        print("Hotkey listener stopped")
+    
+    def is_running(self) -> bool:
+        """Check if listener is running."""
+        return self._running and self._listener is not None and self._listener.is_alive()
