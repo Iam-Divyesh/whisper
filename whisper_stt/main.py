@@ -19,8 +19,20 @@ if sys.platform == 'win32':
 
 import time
 import threading
+import ctypes
 from pathlib import Path
 from typing import Optional
+
+# ─── Single-instance guard ────────────────────────────────────────────────────
+
+def _ensure_single_instance():
+    """Allow only one running copy. Second launch exits silently."""
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\WhisperSTT_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        sys.exit(0)
+    return mutex  # keep reference alive for the process lifetime
+
+_MUTEX = _ensure_single_instance()
 
 from whisper_stt import config
 from whisper_stt.audio.capture import AudioCapture

@@ -34,6 +34,8 @@ function runWithSpinner(label, cmd, args) {
 
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
+    // drain stdout so the buffer never fills and stalls the process
+    child.stdout.on('data', () => {});
     child.stderr.on('data', d => { stderr += d.toString(); });
 
     child.on('close', code => {
@@ -105,13 +107,13 @@ async function main() {
 
   const r1 = await runWithSpinner(
     'Upgrading pip',
-    VENV_PIP, ['install', '--upgrade', 'pip', '--quiet']
+    VENV_PIP, ['install', '--upgrade', 'pip', '-q', '-q']
   );
   if (r1.code !== 0) { row('[✗] pip upgrade failed — continuing...'); }
 
   const r2 = await runWithSpinner(
-    'Installing faster-whisper + dependencies',
-    VENV_PIP, ['install', '-r', REQ_FILE, '--quiet']
+    'Installing packages',
+    VENV_PIP, ['install', '-r', REQ_FILE, '-q', '-q']
   );
 
   if (r2.code !== 0) {
