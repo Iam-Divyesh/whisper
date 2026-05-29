@@ -10,17 +10,19 @@ if (process.platform !== 'win32') {
   process.exit(1);
 }
 
-const PKG_ROOT    = path.join(__dirname, '..');
-const VENV_PY     = path.join(PKG_ROOT, '.venv', 'Scripts', 'python.exe');
-const SETUP_JS    = path.join(PKG_ROOT, 'scripts', 'postinstall.js');
+const PKG_ROOT = path.join(__dirname, '..');
+const VENV_PY  = path.join(PKG_ROOT, '.venv', 'Scripts', 'python.exe');
+const SETUP_JS = path.join(PKG_ROOT, 'scripts', 'postinstall.js');
 
-// First-run guard: postinstall should have run, but just in case
+// Run setup on first use (postinstall can't do this reliably because npm
+// runs it from a temp clone dir before moving the package to node_modules)
 if (!fs.existsSync(VENV_PY)) {
-  console.log('\n  First run — setting up Python environment...\n');
+  console.log('\n  First run — setting up Python environment...');
+  console.log('  This takes a few minutes. Only happens once.\n');
   const r = spawnSync(process.execPath, [SETUP_JS], { stdio: 'inherit' });
   if (r.status !== 0) {
-    console.error('\n  Setup failed. Try reinstalling:');
-    console.error('    npm i -g github:Iam-Divyesh/whisper\n');
+    console.error('\n  Setup failed. Make sure Python 3.8+ is installed:');
+    console.error('  https://python.org  (check "Add Python to PATH")\n');
     process.exit(1);
   }
 }
@@ -31,8 +33,8 @@ const result = spawnSync(
   ['-m', 'whisper_stt.cli.settings_ui'],
   {
     stdio: 'inherit',
-    cwd: PKG_ROOT,
-    env: { ...process.env, PYTHONPATH: PKG_ROOT },
+    cwd:   PKG_ROOT,
+    env:   { ...process.env, PYTHONPATH: PKG_ROOT },
   }
 );
 
