@@ -110,12 +110,13 @@ class WhisperSTTApp:
             self._recording  = False
             self._processing = True
 
-        # Signal streaming to stop, update overlay to "Processing..."
+        # Signal streaming to stop and close the overlay immediately
         if self._stream_stop:
             self._stream_stop.set()
             self._stream_stop = None
         if self._overlay:
-            self._overlay.set_status("Processing...", "#ffa502")
+            self._overlay.hide()
+            self._overlay = None
 
         print("Recording stopped, processing...")
         if self._tray:

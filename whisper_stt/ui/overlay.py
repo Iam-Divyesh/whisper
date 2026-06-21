@@ -96,7 +96,7 @@ class TranscriptionOverlay:
             self._bar_ids.append(rid)
 
         # Hairline divider
-        tk.Frame(root, bg='#1b5e2044', height=1).pack(fill='x', padx=12, pady=(6, 0))
+        tk.Frame(root, bg='#1b2e1b', height=1).pack(fill='x', padx=12, pady=(6, 0))
 
         # Live transcription text (hidden until text arrives)
         self._text_lbl = tk.Label(
