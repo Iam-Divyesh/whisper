@@ -57,9 +57,34 @@ class WhisperSTTApp:
         self._processing         = False
         self._target_hwnd        = None
         self._lock               = threading.Lock()
+        self._model_lock         = threading.Lock()
         self._stream_stop: Optional[threading.Event]    = None
+        self._stream_thread: Optional[threading.Thread]  = None
         self._stream_typed_chunks = 0
+        self._record_start_time  = 0.0
         self._overlay: Optional[TranscriptionOverlay]   = None
+
+    # ── Model access ──────────────────────────────────────────────────────────
+
+    def _get_model(self) -> WhisperModel:
+        """Return the shared model, creating it exactly once.
+
+        Both the background preload thread and an early transcription
+        (if the user records before preload finishes) could otherwise each
+        construct their own WhisperModel instance, briefly doubling memory
+        use. The lock makes construction a single, consistent path.
+        """
+        if self._model is not None:
+            return self._model
+        with self._model_lock:
+            if self._model is None:
+                self._model = WhisperModel(
+                    model_size=config.MODEL_SIZE,
+                    device=config.DEVICE,
+                    compute_type=config.COMPUTE_TYPE,
+                    download_root=str(config.MODEL_DIR),
+                )
+        return self._model
 
     # ── Window focus ──────────────────────────────────────────────────────────
 
@@ -98,10 +123,12 @@ class WhisperSTTApp:
 
         # Show glass overlay and start real-time streaming thread
         self._stream_typed_chunks = 0
+        self._record_start_time = time.time()
         self._overlay = TranscriptionOverlay()
         self._overlay.show()
         self._stream_stop = threading.Event()
-        threading.Thread(target=self._stream_transcribe, daemon=True).start()
+        self._stream_thread = threading.Thread(target=self._stream_transcribe, daemon=True)
+        self._stream_thread.start()
 
     def _stop_recording(self):
         with self._lock:
@@ -110,10 +137,6 @@ class WhisperSTTApp:
             self._recording  = False
             self._processing = True
 
-        # Signal streaming to stop and close the overlay immediately
-        if self._stream_stop:
-            self._stream_stop.set()
-            self._stream_stop = None
         if self._overlay:
             self._overlay.hide()
             self._overlay = None
@@ -122,14 +145,31 @@ class WhisperSTTApp:
         if self._tray:
             self._tray.set_state(TrayState.PROCESSING)
 
-        # Short pause so the streaming thread finishes its current type() call
-        # before we stop the audio stream and read the typed-chunk index.
-        time.sleep(0.15)
+        # Signal streaming to stop, then hand off to a worker thread so the
+        # hotkey listener (which called this method) never blocks. The worker
+        # properly joins the streaming thread before reading stream_typed_chunks
+        # — see _finalize_recording for why a blind sleep here caused duplicates.
+        if self._stream_stop:
+            self._stream_stop.set()
+        threading.Thread(target=self._finalize_recording, daemon=True).start()
+
+    def _finalize_recording(self):
+        """Join the streaming thread, then transcribe only what it missed.
+
+        Runs off the hotkey-listener thread. Joining (rather than a fixed
+        sleep) guarantees that if the streaming thread was mid-transcription
+        when the hotkey was released, we wait for it to finish typing before
+        computing "remaining" audio — otherwise both the streaming thread and
+        this final pass could transcribe and type the same audio twice.
+        """
+        if self._stream_thread:
+            self._stream_thread.join(timeout=10.0)
+            self._stream_thread = None
+        self._stream_stop = None
 
         if self._audio:
             self._audio.stop_recording()
 
-        # Transcribe only the audio the streaming thread hasn't typed yet
         typed_idx = self._stream_typed_chunks
         if typed_idx > 0 and self._audio:
             remaining = self._audio.get_audio_from(typed_idx)
@@ -138,14 +178,9 @@ class WhisperSTTApp:
 
         if remaining is not None and len(remaining) / config.SAMPLE_RATE >= 0.3:
             try:
-                t = threading.Thread(
-                    target=self._transcribe_and_type,
-                    args=(remaining,),
-                    daemon=True,
-                )
-                t.start()
+                self._transcribe_and_type(remaining)
             except Exception as e:
-                print(f"Failed to start transcription thread: {e}")
+                print(f"Failed to transcribe remaining audio: {e}")
                 self._processing = False
                 if self._tray:
                     self._tray.set_state(TrayState.IDLE)
@@ -170,7 +205,15 @@ class WhisperSTTApp:
         while stop and not stop.wait(2.5):
             if not self._recording:
                 break
-            if self._model is None or self._model._model is None:
+
+            # Safety cap — a stuck key or runaway hold shouldn't grow the audio
+            # buffer and per-chunk transcription time without bound.
+            if time.time() - self._record_start_time >= config.MAX_RECORDING_DURATION:
+                print(f"Max recording duration ({config.MAX_RECORDING_DURATION:.0f}s) reached — auto-stopping")
+                threading.Thread(target=self._stop_recording, daemon=True).start()
+                break
+
+            if self._model is None or not self._model.is_loaded:
                 continue  # model not loaded yet — keep waiting
 
             if not self._audio:
@@ -209,14 +252,9 @@ class WhisperSTTApp:
     def _transcribe_and_type(self, audio_data):
         overlay = self._overlay
         try:
-            if self._model is None:
+            model = self._get_model()
+            if not model.is_loaded:
                 print("Loading Whisper model...")
-                self._model = WhisperModel(
-                    model_size=config.MODEL_SIZE,
-                    device=config.DEVICE,
-                    compute_type=config.COMPUTE_TYPE,
-                    download_root=str(config.MODEL_DIR),
-                )
 
             import numpy as np
             duration = len(audio_data) / config.SAMPLE_RATE
@@ -224,7 +262,7 @@ class WhisperSTTApp:
             peak = np.max(np.abs(audio_data))
             print(f"Transcribing {duration:.1f}s audio (RMS:{rms:.4f} Peak:{peak:.4f})...")
 
-            text = self._model.transcribe_sync(audio_data, language=config.get_language())
+            text = model.transcribe_sync(audio_data, language=config.get_language())
 
             if text:
                 print(f"Transcribed: '{text}'")
@@ -277,13 +315,8 @@ class WhisperSTTApp:
     def _preload_model(self):
         try:
             print("Pre-loading Whisper model in background...")
-            self._model = WhisperModel(
-                model_size=config.MODEL_SIZE,
-                device=config.DEVICE,
-                compute_type=config.COMPUTE_TYPE,
-                download_root=str(config.MODEL_DIR),
-            )
-            self._model._load_model()
+            model = self._get_model()
+            model.load()
             print("Model pre-loaded and ready!")
             if self._tray:
                 self._tray.notify("Whisper STT", f"Ready — hold {config.HOTKEY} to record")

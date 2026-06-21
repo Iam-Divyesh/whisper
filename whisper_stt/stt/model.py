@@ -1,5 +1,6 @@
 """Whisper model wrapper using faster-whisper."""
 import os
+import threading
 import numpy as np
 from pathlib import Path
 from typing import Optional, Iterator
@@ -51,7 +52,7 @@ class WhisperModel:
         self.device = device
         self.compute_type = compute_type
         self._model = None
-        self._load_lock = __import__('threading').Lock()
+        self._load_lock = threading.Lock()
 
         # Set default download location
         if download_root is None:
@@ -60,6 +61,15 @@ class WhisperModel:
             self.download_root = download_root
 
         os.makedirs(self.download_root, exist_ok=True)
+
+    @property
+    def is_loaded(self) -> bool:
+        """True once the underlying faster-whisper model has finished loading."""
+        return self._model is not None
+
+    def load(self) -> None:
+        """Public entry point to force-load the model now (e.g. for preloading)."""
+        self._load_model()
 
     def _load_model(self):
         """Lazy load the model — thread-safe, loads exactly once."""

@@ -56,7 +56,11 @@ class AudioCapture:
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 dtype=np.float32,
-                callback=self._callback
+                callback=self._callback,
+                # 'high' latency gives PortAudio a bigger internal buffer so the
+                # Python callback has more slack before the ring buffer overflows
+                # (seen as "input overflow" warnings on Bluetooth/USB mics).
+                latency='high',
             )
             self._stream.start()
     
@@ -125,7 +129,3 @@ class AudioCapture:
     def is_recording(self) -> bool:
         """Check if currently recording."""
         return self._is_recording
-    
-    def get_duration(self) -> float:
-        """Get duration of buffered audio in seconds."""
-        return self._queue.qsize() * 1.0  # Approximate

@@ -1,7 +1,13 @@
 """Global hotkey handling using pynput."""
+import sys
 import threading
 from typing import Callable, Optional
 from pynput import keyboard
+
+# Low-level keyboard hook flag set on synthetic/injected events (SendInput,
+# keybd_event) — used to ignore our own pyautogui Ctrl+V paste simulation,
+# see HotkeyManager._win32_event_filter for why this matters.
+_LLKHF_INJECTED = 0x10
 
 
 class HotkeyManager:
@@ -130,15 +136,32 @@ class HotkeyManager:
                             except Exception as e:
                                 print(f"Hotkey release error: {e}")
     
+    @staticmethod
+    def _win32_event_filter(msg, data):
+        """Ignore synthetic/injected key events on Windows.
+
+        KeyboardTyper pastes text by simulating Ctrl+V (pyautogui). That
+        synthetic Ctrl-down/Ctrl-up is delivered through this SAME low-level
+        keyboard hook — without this filter, our own paste keystroke gets
+        mistaken for the user releasing Ctrl, firing _stop_recording() mid
+        recording even though the real hotkey is still physically held.
+        Returning False here skips on_press/on_release for this event while
+        still letting it reach the OS normally (the paste still works).
+        """
+        if getattr(data, 'flags', 0) & _LLKHF_INJECTED:
+            return False
+        return True
+
     def start(self) -> None:
         """Start listening for hotkeys."""
         if self._running:
             return
-        
-        self._listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release
-        )
+
+        kwargs = dict(on_press=self._on_press, on_release=self._on_release)
+        if sys.platform == 'win32':
+            kwargs['win32_event_filter'] = self._win32_event_filter
+
+        self._listener = keyboard.Listener(**kwargs)
         self._listener.start()
         self._running = True
         print("Hotkey listener started")
