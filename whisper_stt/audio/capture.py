@@ -23,33 +23,26 @@ class AudioCapture:
         self._stream: Optional[sd.InputStream] = None
         self._is_recording = False
         self._lock = threading.Lock()
-        self._chunks: list = []
-        self._chunks_lock = threading.Lock()
-        
+
     def _callback(self, indata: np.ndarray, frames: int, time_info, status: sd.CallbackFlags):
         """Called for each audio chunk."""
         if status:
             print(f"Audio callback status: {status}")
         if self._is_recording:
-            chunk = indata.copy()
-            self._queue.put(chunk)
-            with self._chunks_lock:
-                self._chunks.append(chunk)
-    
+            self._queue.put(indata.copy())
+
     def start_recording(self) -> None:
         """Start recording from microphone."""
         with self._lock:
             if self._is_recording:
                 return
-            
+
             # Clear any existing audio
             while not self._queue.empty():
                 try:
                     self._queue.get_nowait()
                 except queue.Empty:
                     break
-            with self._chunks_lock:
-                self._chunks = []
 
             self._is_recording = True
             self._stream = sd.InputStream(
@@ -99,33 +92,6 @@ class AudioCapture:
             # Concatenate all chunks
             return np.concatenate(chunks, axis=0).flatten()
     
-    def peek_audio(self) -> np.ndarray:
-        """Return all buffered audio so far without clearing the buffer."""
-        with self._chunks_lock:
-            if not self._chunks:
-                return np.array([], dtype=np.float32)
-            return np.concatenate(self._chunks, axis=0).flatten()
-
-    def get_new_audio_since(self, chunk_index: int):
-        """Return (audio, new_chunk_index) for chunks after chunk_index.
-
-        The caller advances its own index each call to get only new audio.
-        """
-        with self._chunks_lock:
-            new_chunks = self._chunks[chunk_index:]
-            new_index = len(self._chunks)
-        if not new_chunks:
-            return np.array([], dtype=np.float32), chunk_index
-        return np.concatenate(new_chunks, axis=0).flatten(), new_index
-
-    def get_audio_from(self, chunk_index: int) -> np.ndarray:
-        """Return audio from chunk_index to end — the un-typed remainder."""
-        with self._chunks_lock:
-            chunks = self._chunks[chunk_index:]
-        if not chunks:
-            return np.array([], dtype=np.float32)
-        return np.concatenate(chunks, axis=0).flatten()
-
     def is_recording(self) -> bool:
         """Check if currently recording."""
         return self._is_recording
