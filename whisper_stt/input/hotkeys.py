@@ -43,15 +43,18 @@ class HotkeyManager:
         keys = set()
         
         key_map = {
+            # generic 'ctrl'/'alt'/'shift' map to the left variant; presses of
+            # either physical side are normalized to this same value by
+            # _normalize() before matching, so both sides trigger the hotkey
             'ctrl': keyboard.Key.ctrl_l,
             'ctrl_l': keyboard.Key.ctrl_l,
-            'ctrl_r': keyboard.Key.ctrl_r,
+            'ctrl_r': keyboard.Key.ctrl_l,
             'alt': keyboard.Key.alt_l,
             'alt_l': keyboard.Key.alt_l,
-            'alt_r': keyboard.Key.alt_r,
+            'alt_r': keyboard.Key.alt_l,
             'shift': keyboard.Key.shift_l,
             'shift_l': keyboard.Key.shift_l,
-            'shift_r': keyboard.Key.shift_r,
+            'shift_r': keyboard.Key.shift_l,
             'space': keyboard.Key.space,
             'tab': keyboard.Key.tab,
             'enter': keyboard.Key.enter,
@@ -80,12 +83,26 @@ class HotkeyManager:
                     print(f"Warning: Unknown key '{part}'")
         
         return keys
-    
+
+    # Right-side modifiers are normalized to their left-side equivalent so
+    # 'ctrl+shift+space' matches regardless of which physical Ctrl/Shift/Alt
+    # key the user presses.
+    _SIDE_NORMALIZE = {
+        keyboard.Key.ctrl_r:  keyboard.Key.ctrl_l,
+        keyboard.Key.shift_r: keyboard.Key.shift_l,
+        keyboard.Key.alt_r:   keyboard.Key.alt_l,
+    }
+
+    @classmethod
+    def _normalize(cls, key):
+        return cls._SIDE_NORMALIZE.get(key, key)
+
     def _on_press(self, key):
         """Handle key press."""
+        key = self._normalize(key)
         with self._lock:
             self._pressed_keys.add(key)
-            
+
             for combo_name, combo_info in self._hotkeys.items():
                 if combo_info['keys'].issubset(self._pressed_keys):
                     if not combo_info['is_pressed']:
@@ -95,12 +112,13 @@ class HotkeyManager:
                                 combo_info['on_press']()
                             except Exception as e:
                                 print(f"Hotkey press error: {e}")
-    
+
     def _on_release(self, key):
         """Handle key release."""
+        key = self._normalize(key)
         with self._lock:
             self._pressed_keys.discard(key)
-            
+
             for combo_name, combo_info in self._hotkeys.items():
                 if combo_info['is_pressed']:
                     # Check if any required key was released
